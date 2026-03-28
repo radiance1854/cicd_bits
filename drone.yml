@@ -1,0 +1,95 @@
+kind: pipeline
+type: docker
+name: build-and-deploy-app
+
+trigger:
+  branch:
+    - dev
+    - main
+  event:
+    - push
+
+steps:
+  # ========= Staging (dev branch) ==========
+
+  - name: build-staging
+    image: docker:cli
+    volumes:
+      - name: dockersock
+        path: /var/run/docker.sock
+    environment:
+      REG_PASS:
+        from_secret: registry_pass
+    commands:
+      - apk add --no-cache make
+      - echo "Building and pushing staging image..."
+      - make staging-build
+    when:
+      branch: dev
+      event:
+        - push
+
+  - name: deploy-staging
+    image: alpine
+    depends_on: [ build-staging ]
+    environment:
+      REG_PASS:
+        from_secret: registry_pass
+      SSH_KEY:
+        from_secret: ssh_key
+    commands:
+      - apk add --no-cache openssh make
+      - mkdir -p ~/.ssh
+      - echo "$SSH_KEY" > ~/.ssh/id_drone
+      - chmod 600 ~/.ssh/id_drone
+      - echo "Deploying staging to target..."
+      - make staging-deploy
+    when:
+      branch: dev
+      event:
+        - push
+
+  # ========= Production (main branch) =========
+
+  - name: build-prod
+    image: docker:cli
+    volumes:
+      - name: dockersock
+        path: /var/run/docker.sock
+    environment:
+      REG_PASS:
+        from_secret: registry_pass
+    commands:
+      - apk add --no-cache make
+      - echo "Building and pushing production image..."
+      - make prod-build
+    when:
+      branch: main
+      event:
+        - push
+
+  - name: deploy-prod
+    image: alpine
+    depends_on: [ build-prod ]
+    environment:
+      REG_PASS:
+        from_secret: registry_pass
+      SSH_KEY:
+        from_secret: ssh_key
+    commands:
+      - apk add --no-cache openssh make
+      - mkdir -p ~/.ssh
+      - echo "$SSH_KEY" > ~/.ssh/id_drone
+      - chmod 600 ~/.ssh/id_drone
+      - echo "Deploying production to target..."
+      - make prod-deploy
+    when:
+      branch: main
+      event:
+        - push
+        
+# Used for docker-in-docker access due to how drone works
+volumes:
+  - name: dockersock
+    host:
+      path: /var/run/docker.sock
